@@ -1,2 +1,24 @@
 # C2P
-该项目访问权限变为隐私，可联系作者邮箱binghua_xl@163.com
+该项目待完善，调整访问权限，可联系作者进行交流（邮箱binghua_xl@163.com）
+
+<br />本工具将C编写的协议代码转换为pi演算代码,配合proverif工具验证协议C代码实现的安全性.
+<br />英文文档参考README_EN.md
+## clang+llvm安装
+C2P依赖llvm和clang，因此需要先安装.以下为作者的安装笔记供参考.<br />#url<br />参考链接：[https://releases.llvm.org/download.html](https://releases.llvm.org/download.html)<br />#安装依赖<br />$ sudo apt-get install build-essential curl libcap-dev git cmake libncurses5-dev python-minimal python-pip unzip libtcmalloc-minimal4 libgoogle-perftools-dev libsqlite3-dev doxygen<br />$ pip3 install tabulate wllvm<br />#安装ninja（可选推荐项，也可用传统的make构建工具）<br />$ sudo apt install ninja-build<br />#在llvm源码目录中创建build文件夹，并切换目录到build<br />$ cd llvm-9.0.0<br />$ mkdir buid<br />$ cd buid<br />#执行cmake命令生成ninja.build(或make工具依赖的makefile）<br />
+
+1. #指定一块编译的llvm项目 -DLLVM_ENABLE_PROJECTS （clang, compiler等，需将对应源码与llvm源码放置同一目录）
+1. #指定安装位置 -DCMAKE_INSTALL_PREFIX
+1. #指定编译版本(debug,release) -DCMAKE_BUILD_TYPE<br />$ cmake -G Ninja  -DLLVM_ENABLE_PROJECTS='clang;compiler-rt' -DCMAKE_INSTALL_PREFIX=&sim;/llvm9.0 -DCMAKE_BUILD_TYPE=release ../<br />#编译并安装<br />$ ninja && ninja install<br />#配置环境变量<br />$ echo "\nexport PATH=$PATH:~/llvm9.0/bin" >> /etc/profile<br />#在当前terminal中生效/重启生效<br />$ source /etc/profile<br />$ reboot
+
+---
+
+## 代码结构
+**main.cpp、CallGraphAction.cpp:**<br />实现C/C++代码翻译器的框架结构，<br />**对Clang AST的遍历：**<br />从TranslationUnitDecl开始出发递归遍历AST的子节点。<br />TranslationUnitDecl由ASTContext：：getTranslationUnitDecl（）获得。<br />RecursiveASTVisitor类中定义好了相应的遍历算法，参见RecursiveASTVisitor教程。<br />**具体：**<br />1.      创建一个FrontendAction  ASTFrontendAction 用于AST，仅需实现CreateASTConsumer, 为每一个translation unit返回一个ASTConsumer。<br />若用到特例化newFrontendActionFactory时，可以控制触发逻辑。<br />2.      创建ASTConsumer<br />用于定义在AST上操作执行的具体Action。入口点在HandleTranslationUnit<br />3.      创建RecursiveASTVisitor <br />这个类为绝大多数AST Nodes提供了hook操作。<br />Bool visitNodeType(NodeType *)   NodeType即我们所关注的节点类型<br />通过在HandleTranslationUnit中调用TravelDecl触发。<br />4.      要构建重写代码的工程需要在上述基础上引入Rewriter类。具体的引入方法参见代码。<br />**函数调用触发逻辑：**<br />CompileInstance初始化调用ExcutionAction, 会依次调用FrontendAction 的6个函数：<br />CreateASTConsumer<br />BeginInvocation<br />BeginSourceFileAction<br />ExecuteAction ParseAST 会执行两个函数<br />HandleToplevelDecl、HandleTranslationUnit  这俩函数中调用TravelDecl触发具体的类型hook<br />EndSourceFile<br />ShouldEraseOutputFiles<br />特例化newFrontendActionFactory模板时，可以自己控制。
+
+**CallGraph.cpp：**<br />CallGraph类实现函数调用时序图的抽取,以及协议C源码的函数静态调用序列获取<br />**CallGraph::CSG_DFS**函数实现函数静态调用序列的获取1    <br />**<br />**CSGvisitor.cpp:**<br />**具体的语句转换.**<br />VisitVarDecl 对变量定义的处理<br />VisitValueStmt 对表达式的处理<br />VisitReturnStmt 对函数返回语句的处理<br />VisitCallExpr 对函数调用表达式的处理<br />以此类推,若想实现更丰富的抽象，可以直接采用定义Visitxxx的形式对具体的C语法进行细粒度处理，xxx为AST语法树所解析的语法,需要对C语言的抽象语法树中的部分概念有一定了解。<br />**CSGVisitor::SimplifyExpr**函数调用pari库，基于上下文对表达式进行约简。<br />**<br />**C2PUtils.cpp:**<br />C2PUtils类中实现了一些通用的函数功能.<br />如**SourceRangeToStr**，将一个上下文中代码片段转换为string类型; <br />**QT2AT**函数将C代码中的数据类型转换为Pi演算中的数据类型.<br />**RewriteBuffer.h  Rewriter.h:**<br />为实现我们的代码转换功能，我们在clang库自带的头文件中更改了某些函数属性，便于使用其中一些未公开的函数功能，可以更细粒度的操作源码。\<br />
+
+## 补充：ClangAST重要的类理解
+ <br />**Decl**<br />表示一个声明或定义。主要包含variable, typedef, function, struct等情况<br /> <br />**FunctionDecl**<br />表示一个函数声明或定义。<br />**有用的函数**：<br />getNameInfo             获取函数名<br />getReturnType            获取返回类型<br />getSourceRange           获取源码范围<br />hasbody                  是否有函数体，用于判断是声明还是定义<br />getbody                  获取函数体<br />param_begin、param_end   函数参数遍历<br />isMain                   是否是main函数<br /> <br /> <br />**RecordDecl**<br />**表示一个结构体/联合体/类**<br />**FieldDecl**<br />表示一个结构体/联合体/类中的成员<br />**Stmt**<br />表示程序中的一个语句<br />表达式语句： 函数调用语句<br /> <br />**CompoundStmt **– <br />This represents a group of statements like { stmt stmt }.<br />**ReturnStmt **– <br />This represents a return, optionally of an expression: return; return 4;.<br />有用的函数：<br />Expr *    getRetValue ()<br />SourceLocation     getBeginLoc () const<br />SourceLocation     getEndLoc () const LLVM_READONLY<br /> BreakStmt<br />ContinueStmt<br />//CapturedStmt<br />CompoundStmt<br />DeclStmt<br />DoStmt<br />ForStmt<br />GotoStmt<br />NullStmt<br />ReturnStmt<br />SwitchCase<br />SwitchStmt<br />ValueStmt<br />WhileStmt<br /> <br /> **RecursiveASTVisitor类**<br />**主要做三件事：(Traverse* > WalkUpFrom* >Visit*)**<br />1. 遍历AST的每个node<br />2. 对给定node，遍历它的class结构体系。从该node的动态类型开始，一直到达最顶端类型，如Stmt，Decl，Type等。<br />3. 对于给定的一个(node, class),  'class'是node的动态类型的基类，调用user-overridable function来真正访问该节点。<br />** **<br />**TraverseDecl(Decl *x) 完成任务1，访问AST树的入口：**<br />TraverseDecl简单调用TraverseFoo（Foo* x）Foo是x的动态类型。<br />TraverseFoo调用WalkUpFromFoo(x)，然后递归访问x节点的子节点。<br />**WalkUpFromFoo(Foo *x)完成任务2，对该节点的类型层次进行上溯遍历。**<br />首先调用WalkUpFromBar(x) ,Bar代表x动态类型的直接父类，然后调用VisitFoo(x)<br />**VisitFoo(Foo *x) 完成任务3.**<br />** **<br />**绝大对数情况下只需override Visit*接口即可，需要更改访问顺序和算法的用户可以修改Traverse*和WalkUpFrom*接口。**<br />** **<br />**默认Preorder遍历**<br />**StmtVisitor****类**<br />**专用于遍历各种****Stmt****的类接口。通过实现****VisitFooStmt****来对****FooStmt****类型的****statement****进行访问。在****clangAST****的定义中，表达式****Expr****也属于****Stmt****一种。**
+# 联系邮箱
+更多问题可联系邮箱binghua_xl@163.com,作者将会尽力协助
+
